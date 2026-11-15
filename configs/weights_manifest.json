@@ -1,0 +1,182 @@
+{
+  "release_tag": "v1.0.0",
+  "repository": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026",
+  "total_assets": 29,
+  "total_bytes": 1907599525,
+  "assets": [
+    {
+      "name": "fpn_timm_regnety_064_fold0.pt",
+      "size_bytes": 63368349,
+      "sha256": "2e0cba413914813721987195d6757be395a733370e91b2754f60a57a4fede332",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/fpn_timm_regnety_064_fold0.pt"
+    },
+    {
+      "name": "fpn_timm_regnety_064_fold1.pt",
+      "size_bytes": 63368349,
+      "sha256": "94f1190e69bd9789d6a9c2ffcc35bd1bf811d26be4d3a0275850df93457efb74",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/fpn_timm_regnety_064_fold1.pt"
+    },
+    {
+      "name": "fpn_timm_regnety_064_fold2.pt",
+      "size_bytes": 63368349,
+      "sha256": "ab928209af1f82c71cfa68c9107ff2199630c99f4f424c5c6b0de0324c2cf52f",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/fpn_timm_regnety_064_fold2.pt"
+    },
+    {
+      "name": "fpn_timm_regnety_064_fold3.pt",
+      "size_bytes": 63368349,
+      "sha256": "ee33f948bc3ae72b49efc60b1a1ecfddaa810547f41ec046fbf3718fe6775ce9",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/fpn_timm_regnety_064_fold3.pt"
+    },
+    {
+      "name": "lgbm_boosters_and_config.tar.gz",
+      "size_bytes": 18455673,
+      "sha256": "43d7e51aef871649ed75f33a439d74300c6a0f5eba8a1ceb9897d31b7fda61ec",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/lgbm_boosters_and_config.tar.gz"
+    },
+    {
+      "name": "unet_efficientnet_b4_fold0.pt",
+      "size_bytes": 40951251,
+      "sha256": "3bd925123eb885eb2234ee38befda019a19d1624ded33440918a4130f696c444",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_efficientnet_b4_fold0.pt"
+    },
+    {
+      "name": "unet_efficientnet_b4_fold1.pt",
+      "size_bytes": 40951251,
+      "sha256": "139acb97d0e709c15c459a26459ac430145f50b6a8d2607e193e43789465f4fa",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_efficientnet_b4_fold1.pt"
+    },
+    {
+      "name": "unet_efficientnet_b4_fold2.pt",
+      "size_bytes": 40951251,
+      "sha256": "b812212876739df27abbb3d617b85550b4ea65b451948a017f1e63c0240a79b3",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_efficientnet_b4_fold2.pt"
+    },
+    {
+      "name": "unet_efficientnet_b4_fold3.pt",
+      "size_bytes": 40951251,
+      "sha256": "269f7b322e94908b9fe504e3fd66f43bf22cf334eb83e4e07cb2f6a13cf80646",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_efficientnet_b4_fold3.pt"
+    },
+    {
+      "name": "unet_resnext50_32x4d_fold0.pt",
+      "size_bytes": 64250127,
+      "sha256": "12b0bfc21ca403fe2e5c01cdda39aeb4ec4c143430c167f7161a2d8aa8433b27",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_resnext50_32x4d_fold0.pt"
+    },
+    {
+      "name": "unet_resnext50_32x4d_fold1.pt",
+      "size_bytes": 64250127,
+      "sha256": "5ce20fb744d41754ad2a2dd559f165e4b388befd4172741e4c71ca22a724adcb",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_resnext50_32x4d_fold1.pt"
+    },
+    {
+      "name": "unet_resnext50_32x4d_fold2.pt",
+      "size_bytes": 64250127,
+      "sha256": "3772c7354d24ccad367c9503e01a90a6c67cf52dfee926540395e089653f32e0",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_resnext50_32x4d_fold2.pt"
+    },
+    {
+      "name": "unet_resnext50_32x4d_fold3.pt",
+      "size_bytes": 64250127,
+      "sha256": "0caa1501c7d1efd422e31f98fcf374b284270457b82b3e9934ce2a906b1a29e9",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_resnext50_32x4d_fold3.pt"
+    },
+    {
+      "name": "unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold0.pt",
+      "size_bytes": 107266939,
+      "sha256": "06965b82de601d5035faac723e8e652b22f8aba44dce7f557ff8cdb3c3f5b2af",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold0.pt"
+    },
+    {
+      "name": "unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold1.pt",
+      "size_bytes": 107266939,
+      "sha256": "c75caaa3587393358a32ea7c41ff1eb0c391246e3c190069e0bd05d8a2bb4af7",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold1.pt"
+    },
+    {
+      "name": "unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold2.pt",
+      "size_bytes": 107266939,
+      "sha256": "7fe029486a740443da5387a8085c7bb7641f7f397b4e330607da88ff3ff29d60",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold2.pt"
+    },
+    {
+      "name": "unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold3.pt",
+      "size_bytes": 107266939,
+      "sha256": "da3ff09c6f994f966d023aafd9d008207613b108b552547a6e89d8e959ace580",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold3.pt"
+    },
+    {
+      "name": "unet_tu_hrnet_w32_ms_in1k_fold0.pt",
+      "size_bytes": 72791227,
+      "sha256": "7a71594212f94ced498d7104619427e76cdc774484cb582f35e1da9cf249a24a",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_hrnet_w32_ms_in1k_fold0.pt"
+    },
+    {
+      "name": "unet_tu_hrnet_w32_ms_in1k_fold1.pt",
+      "size_bytes": 72791227,
+      "sha256": "8c7495a0623ee366820ee8f79567fe470eb8f65e52e89177d404a04c91021e48",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_hrnet_w32_ms_in1k_fold1.pt"
+    },
+    {
+      "name": "unet_tu_hrnet_w32_ms_in1k_fold2.pt",
+      "size_bytes": 72791227,
+      "sha256": "bdbd787aa673e7b3a7307f893e01df65c6b232fa5cb59a08fc0e286685d917e6",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_hrnet_w32_ms_in1k_fold2.pt"
+    },
+    {
+      "name": "unet_tu_hrnet_w32_ms_in1k_fold3.pt",
+      "size_bytes": 72791227,
+      "sha256": "c8c68e55a56554370d1f8b6fbd86534e7061f2377275be4198b2f9a2e3b5a284",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unet_tu_hrnet_w32_ms_in1k_fold3.pt"
+    },
+    {
+      "name": "unetplusplus_densenet169_fold0.pt",
+      "size_bytes": 78422176,
+      "sha256": "79a65c7b012706ce5029e9716b5adcda4c3e159648e6df0dac362aa5b14612ae",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unetplusplus_densenet169_fold0.pt"
+    },
+    {
+      "name": "unetplusplus_densenet169_fold1.pt",
+      "size_bytes": 78422176,
+      "sha256": "7653ac64e70045aa710c494717d96bf56fb275476e350c31f93e5463af15dfda",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unetplusplus_densenet169_fold1.pt"
+    },
+    {
+      "name": "unetplusplus_densenet169_fold2.pt",
+      "size_bytes": 78422176,
+      "sha256": "4728fd563ec66c8560c022309e7754aae026f2eb506b13a32808082a7e597fd0",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unetplusplus_densenet169_fold2.pt"
+    },
+    {
+      "name": "unetplusplus_densenet169_fold3.pt",
+      "size_bytes": 78422176,
+      "sha256": "22fad1a59ec4e1848f644c4cc6f06eb2838b4698933e96f51a09dc687f71d81e",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unetplusplus_densenet169_fold3.pt"
+    },
+    {
+      "name": "yolo_fold0.pt",
+      "size_bytes": 45235894,
+      "sha256": "d6af86916e15173af482b80c59dbb69671fe24c60f980b02b373519c1ac4095e",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/yolo_fold0.pt"
+    },
+    {
+      "name": "yolo_fold1.pt",
+      "size_bytes": 45235894,
+      "sha256": "552cf4e5feeb5e193822e9b9453f73e06c7f6aacc410e5dd28d5da7fdcf4e91a",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/yolo_fold1.pt"
+    },
+    {
+      "name": "yolo_fold2.pt",
+      "size_bytes": 45235894,
+      "sha256": "91f4a801d5e023ab30721cc7aab2d6c839833eef935c77b9c56717513c9603b1",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/yolo_fold2.pt"
+    },
+    {
+      "name": "yolo_fold3.pt",
+      "size_bytes": 45235894,
+      "sha256": "ab30041433832109f4c509d0dfc36d9e99ac70e0bd7905b7c213a75b89abfb66",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/yolo_fold3.pt"
+    }
+  ]
+}

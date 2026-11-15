@@ -1,0 +1,160 @@
+% =============================================================================
+% COPYRIGHT AND DISCLAIMER
+% =============================================================================
+% This file is provided as a convenience template for competition participants.
+% By using it, you accept full responsibility for compliance with all applicable
+% copyright, licensing, and usage rules of the Association for Computing
+% Machinery (ACM) and of any LaTeX packages you load (including, without
+% limitation, the "acmart" document class and related ACM materials).
+% =============================================================================
+
+\documentclass[sigconf]{acmart}
+\input{preamble}
+
+\guideStylefalse
+
+\begin{document}
+
+\title[Dinkelbach Compromise Supervision and Exact MWIS Packing]{Dinkelbach-Optimal Multi-Annotator Compromise Supervision, Dual-Anchored Proposal Calibration, and Exact Disjoint Set Packing}
+\subtitle{A Solution to the Solar Filament Segmentation Challenge 2026} % DO NOT CHANGE
+
+\author{Amit Gunjan}
+\affiliation{%
+  \institution{Nalanda University}
+  \city{Rajgir}
+  \country{India}
+}
+\email{amit.202614029@nalandauniv.edu.in}
+
+\begin{abstract}
+    This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations. Independent human observers exhibit substantial boundary variation on diffuse filament barbs and chromospheric bridges, so standard union mask supervision inflates predicted silhouettes and depresses Panoptic Quality. We derive a Dinkelbach fractional optimization framework that converts multi-annotator polygons into signed-distance compromise silhouettes, calibrated consensus maps, interior spines, and repulsion seams. Our end-to-end dynamic pipeline integrates physical three-channel limb normalization, six-backbone channel-aware Welford streaming, three-channel compromise \texttt{YOLO11m-Seg} proposals, dual-anchored gradient boosting, and exact branch-and-bound Maximum-Weight Independent Set (\texttt{MWIS}) packing. Across all 707 solar-day-grouped Out-Of-Fold stems ($1{,}949$ annotator records), our ensemble reaches $0.4633 \pm 0.0066$ Panoptic Quality ($0.6868 \pm 0.0038$ Segmentation Quality and $0.4786$ holdout validation Panoptic Quality) with zero overlapping pixels.
+\end{abstract}
+
+\maketitle
+
+% ==================================== %
+%              INTRODUCTION            %
+% ==================================== %
+\section{Introduction}
+    This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}. Because MAGFiLO provides $K_s \ge 1$ independent human annotation sets per $2048 \times 2048$ disk and evaluates predictions under micro-averaged Panoptic Quality~\cite{kirillov2019panoptic} with strict pixel-disjointness, naive $1$-of-$K_s$ union targets inflate contours by $1.8\times$--$2.6\times$ and merge adjacent channels. We align target construction, cross-generation streaming, proposal calibration, and combinatorial instance selection directly with the fractional Panoptic Quality objective. Our reproducible code and weights are publicly available at \url{https://github.com/DayDreamer-commits/solar-filament-segmentation-2026}.
+
+% ==================================== %
+%              METHODOLOGY             %
+% ==================================== %
+\section{Methodology}\label{sec:methodology}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.99\textwidth]{figures/pipeline_architecture.pdf}
+  \caption{End-to-end dynamic panoptic pipeline: (1) physical three-channel disk normalization, (2a--2b) streaming six-family dense segmentation and four-fold three-channel \texttt{YOLO11m-Seg}, (3) unshaved topological proposal graph with 60 relational features, (4) dual-anchored 48-booster LightGBM calibration, and (5) exact branch-and-bound \texttt{MWIS} packing enforcing zero pixel overlap.}
+  \Description{Five-stage horizontal flowchart of the solar filament panoptic segmentation pipeline from 2048x2048 GONG H-alpha input through streaming neural ensembles, topological proposal extraction, dual-anchored LightGBM scoring, and exact MWIS disjoint packing.}
+  \label{fig:pipeline}
+\end{figure*}
+
+\subsection{Dinkelbach Compromise Supervision}
+Let stem $s$ carry $K_s$ human annotation sets $\{G_{s,1},\dots,G_{s,K_s}\}$. Global Panoptic Quality~\cite{kirillov2019panoptic} at $\mathrm{IoU} > 0.50$ equals:
+\begin{equation}\label{eq:pq}
+\mathrm{PQ} = \underbrace{\frac{\sum_{(p,g)\in\mathrm{TP}}\mathrm{IoU}(p,g)}{|\mathrm{TP}|}}_{\mathrm{SQ}} \times \underbrace{\frac{|\mathrm{TP}|}{|\mathrm{TP}|+\frac{1}{2}|\mathrm{FP}|+\frac{1}{2}|\mathrm{FN}|}}_{\mathrm{RQ}}.
+\end{equation}
+Against observer $k$, candidate $p$ earns match quality $u_k(p) = \allowbreak \max_{g\in G_{s,k}}\mathrm{IoU}(p,g)\,\allowbreak\mathbb{I}[\mathrm{IoU}(p,g)>0.50]$. Whether $u_k(p)>0$ (converting one $\mathrm{FN}$ to one $\mathrm{TP}$) or $u_k(p)=0$ (adding one $\mathrm{FP}$), candidate $p$ adds $+0.5$ to the denominator per observer, yielding exact marginal denominator cost $0.5 K_s$. By Dinkelbach's fractional programming theorem~\cite{dinkelbach1967nonlinear}, at equilibrium $\lambda^* = \mathrm{PQ}^*$, a singleton mask $p$ improves global $\mathrm{PQ}$ if and only if its mean match quality satisfies:
+\begin{equation}\label{eq:dinkelbach}
+\Delta\Phi(p;\lambda^*) = \sum_{k=1}^{K_s} u_k(p) - 0.5 K_s \lambda^* > 0 \;\Longleftrightarrow\; \bar{u}(p) > \frac{\lambda^*}{2},
+\end{equation}
+where $\bar{u}(p) = K_s^{-1}\sum_{k=1}^{K_s} u_k(p)$. Splitting parent mask $p_{\mathrm{union}}$ into disjoint children $(p_a,p_b)$ adds one extra denominator unit ($0.5 K_s$) and improves $\mathrm{PQ}$ only when $\bar{u}(p_a)+\bar{u}(p_b)-\lambda_{\mathrm{split}} > \bar{u}(p_{\mathrm{union}})$ with $\lambda_{\mathrm{split}}\approx \frac{1}{2}\lambda^* \in [0.22, 0.25]$.
+
+To eliminate union halo bloat during training, we cluster cross-annotator polygons at $\mathrm{IoU}\ge 0.25$, compute the zero-level contour of their mean signed Euclidean distance field ($\mathrm{SDF}$), and retain clusters satisfying $\sum_{k=1}^{K_s} u_k(c) \ge 0.35 K_s$. From these compromise instances we build four dense pixel supervision channels: (1) compromise silhouette $p_0$ with a $1$-pixel zero gap carved along touching boundaries, trained with symmetric soft-Jaccard loss; (2) calibrated pixel agreement $p_1 = K_s^{-1}\sum_{k=1}^{K_s} M_{s,k}$; (3) normalized Euclidean interior distance spine $p_2$; and (4) a dilated $5$-pixel repulsion seam $p_3$ between adjacent instances.
+
+\subsection{Sampling Strategy and Solar-Day Splits}
+The official training set comprises $707$ unique $2048\times 2048$ GONG H-$\alpha$ stems spanning $1{,}949$ annotator-image records ($445$ multi-annotator stems with $K_s \in \{2,\dots,6\}$ and $262$ single-annotator stems). Because multiple GONG stations capture the same solar rotation within hours, random image splits leak filament morphology across folds. We parse the observation date \texttt{YYYYMMDD} from every stem and group all observations from the same solar calendar day into the same fold across four balanced folds (\path{configs/clean_4fold_split.json}), alongside a deterministic $141$-stem holdout subset (\texttt{Val-141}). During dense segmentation training, we extract $1024\times 1024$ native-resolution crops ($70\%$ foreground-centered, $30\%$ uniform disk context) with full $D_4$ dihedral flips and $90^\circ$ rotations.
+
+\subsection{End-to-End Pre-Processing, Neural Streaming, and Post-Processing}
+Figure~\ref{fig:pipeline} illustrates our five-stage dynamic pipeline:
+\begin{enumerate}
+  \item \textbf{Physical Three-Channel Disk Normalization:} To remove station-dependent exposure drift and center-to-limb darkening across the seven GONG instruments, we compute intensity percentiles $(P_{10},P_{50},P_{90})$ strictly inside solar radius $R \le 940$~px and stack three channels: scaled disk intensity $\mathrm{clip}((I-P_{50})/\allowbreak(2(P_{90}-P_{10}))+0.5,0,1)$, $16\times 16$ CLAHE local contrast, and Gaussian limb-flattened absorption $\mathrm{clip}((G_{\sigma=18}(I)-I)/\allowbreak(P_{90}-P_{10})+0.5,0,1)$.
+  \item \textbf{Six-Family Dense Streaming and Three-Channel YOLO:} Full-disk downsampling erases $3$-pixel filament spines. We combine $24$ full-resolution checkpoints across six diverse architectures: fourth-generation four-channel ConvNeXt-Small U-Net~\cite{liu2022convnet}, HRNet-W32 U-Net~\cite{wang2020deep}, and RegNetY-064 FPN~\cite{radosavovic2020designing}, plus third-generation three-channel EfficientNet-B4 U-Net~\cite{tan2019efficientnet}, DenseNet-169 U-Net++~\cite{zhou2018unetplusplus}, and SE-ResNeXt50 U-Net. Our $\mathcal{O}(1)$-memory Welford streamer applies channel-specific weights: $p_0$ concentrates $91.4\%$ weight on crisp fourth-generation backbones ($[3.6,\allowbreak 2.0,\allowbreak 1.8,\allowbreak 0.25,\allowbreak 0.25,\allowbreak 0.20]$), whereas $(p_1,p_2)$ fuse all six families ($[3.2,\allowbreak 1.8,\allowbreak 1.8,\allowbreak 1.2,\allowbreak 1.2,\allowbreak 0.9]$) while tracking third-generation union probability $p_{0,\mathrm{v3}}$ to expose the neural multi-annotator ambiguity gap $\Delta p_0 = p_{0,\mathrm{v3}}-p_0$. In parallel, four-fold \texttt{YOLO11m-Seg} ($1024\times 1024$, \path{mask_ratio=1}) trained on our normalized three-channel disks and Dinkelbach polygons supplies instance proposals calibrated by cross-fold consensus $w_{\mathrm{tot}}/\sqrt{k M}$.
+  \item \textbf{Unshaved Topological Proposals and Dual-Anchored GBDT:} From $(p_0,p_1,p_2,p_3,p_{0,\mathrm{v3}})$ and YOLO clusters, we extract native-boundary candidates across seven topological families $\mathcal{S}=\{0,1,2,3,6,7,10\}$: seam cuts ($p_0\ge 0.50 \land p_3<0.45$), unsplit parents, spine Voronoi splits, morphological bridges, YOLO-spanned component unions, soft-seam cuts ($p_3<0.36$), and principal-axis tip-tangent links, sealing internal chromospheric vacuoles via external contour fill. Excluding coarse $256\times 256$ raw YOLO masks (source~$4$) and boundary-shaved masks (source~$8$) preserves native $2048\times 2048$ barb geometry ($+0.0056$ \texttt{Val-141} $\mathrm{PQ}$). For each candidate we compute $60$ geometric, cross-architecture dispersion, neural ambiguity, and parent-child relational features. To prevent \texttt{yolo\_conf} ($52.3\%$ gain in a single tree model) from suppressing thin limb arcs missed at $1024$~px, we blend $24$ full-feature LightGBM~\cite{ke2017lightgbm} boosters with $24$ segmentation-only boosters ($\hat{u}=0.60\,\hat{u}_{\mathrm{full}}+0.40\,\hat{u}_{\mathrm{seg}}$) trained across four multi-prior smooth-$L_1$ folds.
+  \item \textbf{Exact Disjoint \texttt{MWIS} Set Packing:} Candidates with $\hat{u}\ge \tau$ ($\tau=0.22$) form a conflict graph where an edge connects any pair overlapping by $>12\%$ of the smaller mask. Each connected component ($\le 22$ nodes) is solved \emph{exactly} via bitmask branch-and-bound Maximum-Weight Independent Set (\texttt{MWIS}) maximizing $\sum_{i\in I}(\hat{u}_i - \lambda_{\mathrm{split}})$ ($\lambda_{\mathrm{split}}=0.24$). Any minor residual boundary contact ($\le 12\%$) is subtracted in descending score order, guaranteeing \textbf{zero overlapping pixels} across every disk.
+\end{enumerate}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.99\textwidth]{figures/segmentation_examples.pdf}
+  \caption{Qualitative segmentation morphology on GONG Big Bear H-$\alpha$ observation \texttt{20140406195854Bh}: (a) full disk with $K=3$ independent human annotator contours (red, amber, cyan), (b) our pixel-disjoint \texttt{v4.6} panoptic output ($12$ instances, $0$ overlap pixels), and magnified $520\times 520$ active-region crops comparing (c) inter-annotator halo and split disagreement against (d) crisp Dinkelbach compromise boundaries and fine lateral barbs.}
+  \Description{Four side-by-side solar H-alpha panels comparing K=3 human annotator contours against the proposed pixel-disjoint v4.6 instance segmentation masks on full disk and zoomed 520x520 region.}
+  \label{fig:examples}
+\end{figure*}
+
+Figure~\ref{fig:examples} demonstrates our segmentation morphology on a three-annotator Big Bear H-$\alpha$ disk, resolving fine lateral barbs while separating parallel magnetic channels without halo bloat.
+
+% ==================================== %
+%              EVALUATION              %
+% ==================================== %
+\section{Evaluation}\label{sec:evaluation}
+
+\begin{table*}[t]
+  \centering
+  \footnotesize
+  \caption{Controlled solar-day-grouped four-fold Out-Of-Fold ($\mathrm{OOF}$, $707$ stems, $1{,}949$ annotator records) progression, fold-level uncertainty ($\mathrm{mean}\pm\mathrm{std}$ across four folds), and holdout \texttt{Val-141} performance. Every row enforces strict zero-pixel instance overlap.}
+  \label{tab:ablation}
+  \begin{tabular}{lccccc}
+    \toprule
+    Pipeline Configuration & Global 707-OOF PQ & 4-Fold PQ ($\mu \pm \sigma$) & OOF SQ ($\mu \pm \sigma$) & OOF RQ ($\mu \pm \sigma$) & Val-141 PQ \\
+    \midrule
+    Dynamic Single-Family Baseline & 0.3680 & $0.3681 \pm 0.0094$ & $0.6510 \pm 0.0049$ & $0.5653 \pm 0.0112$ & 0.3812 \\
+    v3 \texttt{YOLO11m-Seg} ($1$-Ch Raw Grayscale, $1024$~px) & 0.3627 & $0.3629 \pm 0.0088$ & $0.6412 \pm 0.0046$ & $0.5657 \pm 0.0105$ & 0.3765 \\
+    \textbf{v4 \texttt{YOLO11m-Seg} ($3$-Ch Dinkelbach, $1024$~px)} & \textbf{0.4031} & $\mathbf{0.4032 \pm 0.0079}$ & $\mathbf{0.6559 \pm 0.0042}$ & $\mathbf{0.6146 \pm 0.0096}$ & \textbf{0.4184} \\
+    \midrule
+    v3 SE-ResNeXt50 U-Net ($1$-of-$K$ Union Supervision) & 0.4153 & $0.4154 \pm 0.0076$ & $0.6672 \pm 0.0041$ & $0.6224 \pm 0.0091$ & 0.4290 \\
+    v3 DenseNet-169 U-Net++ ($1$-of-$K$ Union Supervision) & 0.4170 & $0.4171 \pm 0.0075$ & $0.6685 \pm 0.0040$ & $0.6238 \pm 0.0090$ & 0.4315 \\
+    v3 EfficientNet-B4 U-Net ($1$-of-$K$ Union Supervision) & 0.4248 & $0.4249 \pm 0.0072$ & $0.6696 \pm 0.0039$ & $0.6344 \pm 0.0088$ & 0.4385 \\
+    v3 Four-Family Dynamic Topological Ensemble & 0.4541 & $0.4542 \pm 0.0069$ & $0.6745 \pm 0.0039$ & $0.6732 \pm 0.0084$ & 0.4648 \\
+    \midrule
+    \textbf{v4 RegNetY-064 FPN ($4$-Ch Dinkelbach Solo)} & \textbf{0.4437} & $\mathbf{0.4438 \pm 0.0070}$ & $\mathbf{0.6841 \pm 0.0038}$ & $\mathbf{0.6486 \pm 0.0086}$ & \textbf{0.4602} \\
+    \textbf{v4 HRNet-W32 U-Net ($4$-Ch Dinkelbach Solo)} & \textbf{0.4523} & $\mathbf{0.4524 \pm 0.0068}$ & $\mathbf{0.6850 \pm 0.0038}$ & $\mathbf{0.6603 \pm 0.0083}$ & \textbf{0.4690} \\
+    \textbf{v4 ConvNeXt-Small U-Net ($4$-Ch Dinkelbach Solo)} & \textbf{0.4570} & $\mathbf{0.4571 \pm 0.0067}$ & $\mathbf{0.6876 \pm 0.0037}$ & $\mathbf{0.6646 \pm 0.0082}$ & \textbf{0.4696} \\
+    \midrule
+    v4.6 Six-Family + $3$-Ch YOLO (All Sources + Single GBDT) & 0.4610 & $0.4610 \pm 0.0067$ & $0.6858 \pm 0.0038$ & $0.6722 \pm 0.0082$ & 0.4725 \\
+    \textbf{v4.6 Six-Family + $3$-Ch YOLO + Dual-GBDT + Exact MWIS} & \textbf{0.4633} & $\mathbf{0.4633 \pm 0.0066}$ & $\mathbf{0.6868 \pm 0.0038}$ & $\mathbf{0.6746 \pm 0.0081}$ & \textbf{0.4786} \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/official_pq_diagnostics.pdf}
+  \caption{Official host evaluation diagnostics across $4{,}589$ pixel-disjoint \texttt{OOF} predictions ($5{,}295$ $\mathrm{TP}$, $2{,}209$ $\mathrm{FP}$, $2{,}904$ $\mathrm{FN}$): pairwise $\mathrm{IoU}$ distribution, pairwise Dice distribution, and one-to-many / many-to-one overlap multiplicity.}
+  \Description{Three diagnostic histograms showing pairwise IoU above 0.50 with mode above 0.72, pairwise Dice above 0.84, and predominant 1-to-1 ground-truth to prediction correspondence.}
+  \label{fig:diagnostics}
+\end{figure}
+
+\subsection{Evaluation Strategy and Quantitative Results}
+We evaluate every modeling decision strictly out-of-fold across all $707$ solar-day-grouped training stems ($1{,}949$ annotator records) using the official Panoptic Quality script (\path{scripts/evaluate_official_pq.py}), reporting global micro-averaged $\mathrm{PQ}$ alongside fold-level uncertainty ($\mu\pm\sigma$ across the four solar-day folds: Fold~0 $0.4726$, Fold~1 $0.4619$, Fold~2 $0.4646$, Fold~3 $0.4542$).
+
+Table~\ref{tab:ablation} summarizes our controlled ablation progression:
+\begin{itemize}
+  \item \textbf{Physical Normalization \& Compromise YOLO ($+0.0404$ $\mathrm{PQ}$):} Replacing raw grayscale union labels with normalized three-channel disks and Dinkelbach polygons raises standalone \texttt{YOLO11m-Seg} $\mathrm{OOF}$ $\mathrm{PQ}$ from $0.3627$ to $0.4031$.
+  \item \textbf{Dinkelbach Supervision vs.\ Union Labels:} Switching from $1$-of-$K_s$ union targets to four-channel Dinkelbach compromise silhouettes and $5$~px seams lifts single-family $\mathrm{SQ}$ from $0.6696$ to $0.6876$, allowing a \emph{single} ConvNeXt-Small family ($0.4570$) to surpass the entire four-family \texttt{v3} ensemble ($0.4541$).
+  \item \textbf{Cross-Generation Fusion, Dual-GBDT, and \texttt{MWIS}:} Combining all $28$ checkpoints with unshaved topological set $\mathcal{S}$, Dual-Anchored LightGBM, and exact \texttt{MWIS} packing reaches $0.4633 \pm 0.0066$ global $\mathrm{OOF}$ $\mathrm{PQ}$ and $0.4786$ on \texttt{Val-141}. Figure~\ref{fig:diagnostics} confirms a sharp pairwise $\mathrm{IoU}$ mode above $0.72$ (mean Dice $>0.81$) and clean $1\!:\!1$ structural correspondence with minimal over-splitting or over-merging.
+\end{itemize}
+In offline hidden-test execution ($180$ disks, internet disabled), our dynamic kernels achieve $0.40$ (\texttt{v3}) and $0.39$ (\texttt{v4.6}) Public Leaderboard $\mathrm{PQ}$ with zero pixel overlap, completing all $28$ models ($4\times$ TTA) in $54.2$~min on $2\times\mathrm{T4}$ GPUs ($<3.2\,\mathrm{GB}$ RAM) or $<56$~min on four vCPUs via native-scale YOLO region packing.
+
+\subsection{Strengths, Weaknesses, and Future Improvements}
+\textbf{Strengths:} Our formulation directly optimizes the fractional multi-annotator $\mathrm{PQ}$ equilibrium without post-hoc erosion heuristics, preserves $1$-pixel barb fidelity at native $2048\times 2048$ resolution, decouples LightGBM calibration from detector dropout, and guarantees exact zero-pixel overlap.
+\textbf{Weaknesses:} (1) Near the extreme solar limb ($R > 920$~px), projection foreshortening compresses filaments into $2$--$3$~px arcs where $2$-pixel human tracing offsets push $\mathrm{IoU}$ below $0.50$. (2) Quiescent channels interrupted by $>50$~px chromospheric brightenings remain topologically ambiguous when observers diverge between single-structure and split annotations.
+\textbf{Strategies for Improvement:} Unwarping limb regions onto Carrington heliographic coordinates prior to convolution would equalize foreshortened stroke widths, and incorporating $\pm 1$-hour multi-cadence GONG sequences would disambiguate transient chromospheric brightenings along persistent magnetic polarity inversion lines.
+
+% ==================================== %
+%            ACKNOWLEDGMENT            %
+% ==================================== %
+\section{Acknowledgment}\label{sec:acknowledgment}
+    % Do not change
+    The organization of the Filament Segmentation Challenge 2026 is partially supported by the U.S. National Science Foundation (NSF) under Grant No. 2209912 and 2433781, directorate for Computer and Information Science and Engineering (CSE), and Office of Advanced Cyberinfrastructure (OAC), and Grant No. 2511630, AST Division Of Astronomical Sciences and MPS Directorate for Mathematical and Physical Sciences.
+
+    The Filament Segmentation Challenge 2026 is sponsored by the U.S. National Science Foundation (NSF) National Solar Observatory (NSO). 
+
+    This work utilizes GONG data obtained by the NSO Integrated Synoptic Program, managed by the National Solar Observatory, which is operated by the Association of Universities for Research in Astronomy (AURA), Inc. under a cooperative agreement with the National Science Foundation and with contribution from the National Oceanic and Atmospheric Administration. The GONG network of instruments is hosted by the Big Bear Solar Observatory, High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias, and Cerro Tololo Interamerican Observatory.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{main}
+
+\end{document}
