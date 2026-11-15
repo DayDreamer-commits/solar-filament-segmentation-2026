@@ -52,8 +52,8 @@ def build_pipeline_figure(out_pdf: Path) -> None:
     # Stage 2a: 6-Family Seg Stream (top)
     draw_box(
         2.62, 1.35, 2.60, 1.05,
-        "2a. 6-Family Seg Stream",
-        "v4 (4-Ch): ConvNeXt, HRNet, RegNetY\nv3 (3-Ch): EffB4, D169, ResNeXt50",
+        "2a. 6-Family 8x D4 Stream",
+        "v4 (4-Ch, 8x): ConvNeXt, HRNet, RegNetY\nv3 (3-Ch, 4x/2x): EffB4, D169, ResNeXt50",
         edge="#16a34a", face="#f0fdf4", title_color="#15803d",
     )
 
@@ -61,7 +61,7 @@ def build_pipeline_figure(out_pdf: Path) -> None:
     draw_box(
         2.62, 0.15, 2.60, 1.05,
         "2b. 3-Ch YOLO11m-Seg",
-        "4-Fold 1024 px Instance Detector\nDinkelbach Polygons, w / sqrt(kM)",
+        "4-Fold 1024 px Instance Detector\nDinkelbach Polygons, w_tot / M",
         edge="#d97706", face="#fffbeb", title_color="#b45309",
     )
 
@@ -69,15 +69,15 @@ def build_pipeline_figure(out_pdf: Path) -> None:
     draw_box(
         5.54, 0.30, 2.48, 1.95,
         "3. Topological\nProposal Graph",
-        "Unshaved S = {0,1,2,3,6,7,10}\nSeam Cuts & Spine Voronoi\nYOLO Unions & Tip Links\n60 Relational Features",
+        "Clean S = {0, 1, 2, 3, 5, 6}\nSeam Cuts & Spine Voronoi\nConsensus & YOLO Unions\n60 Relational Features",
         edge="#7c3aed", face="#f5f3ff", title_color="#6d28d9",
     )
 
-    # Stage 4: Dual-Anchored LightGBM
+    # Stage 4: Dual-Generation LightGBM
     draw_box(
         8.34, 0.30, 2.48, 1.95,
-        "4. Dual-Anchored\nLightGBM Rankers",
-        "24x Full Boosters (60-feat)\n24x Seg-Only Boosters (52-feat)\nu = 0.60 u_full + 0.40 u_seg\nCalibrated Expected IoU",
+        "4. Dual-Generation\nLightGBM (52x)",
+        "24x Full + 24x Seg + 4x v3\n0.65 (0.55 u_y + 0.45 u_s)\n+ 0.35 u_v3 Bayes Ranker\nCalibrated Expected IoU",
         edge="#dc2626", face="#fef2f2", title_color="#b91c1c",
     )
 
@@ -85,7 +85,7 @@ def build_pipeline_figure(out_pdf: Path) -> None:
     draw_box(
         11.14, 0.30, 2.31, 1.95,
         "5. Exact Dinkelbach\nMWIS Packing",
-        "Branch-and-Bound MWIS\ntau = 0.22, split = 0.24\nStrict 0-Pixel Overlap\nRLE submission.csv",
+        "Branch-and-Bound MWIS\ntau = 0.225, split = 0.24\nStrict 0-Pixel Overlap\nRLE submission.csv",
         edge="#0d9488", face="#f0fdfa", title_color="#0f766e",
     )
 

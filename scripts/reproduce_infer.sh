@@ -12,7 +12,9 @@ TEST_DIR="${TEST_DIR:-/kaggle/input/filament-segmentation-2026/MAGFiLO_1.0_Kaggl
 OUT_CSV="${OUT_CSV:-./submission.csv}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [[ -f "${BUNDLE_DIR}/ensemble_v4_config.json" ]]; then
+if [[ -f "${REPO_ROOT}/configs/ensemble_v4_config.json" ]]; then
+  CFG_PATH="${REPO_ROOT}/configs/ensemble_v4_config.json"
+elif [[ -f "${BUNDLE_DIR}/ensemble_v4_config.json" ]]; then
   CFG_PATH="${BUNDLE_DIR}/ensemble_v4_config.json"
 else
   CFG_PATH="${BUNDLE_DIR}/ensemble_config.json"
@@ -20,6 +22,7 @@ fi
 
 echo "[1/2] Running dynamic panoptic inference using ${CFG_PATH}..."
 SF_ENS_CONFIG="${CFG_PATH}" \
+SF_EXTRA_ASSET_DIRS="${BUNDLE_DIR}" \
 SF_TEST_DIR="${TEST_DIR}" \
 SF_OUT_CSV="${OUT_CSV}" \
   python3 "${REPO_ROOT}/src/inference_v4_panoptic.py"

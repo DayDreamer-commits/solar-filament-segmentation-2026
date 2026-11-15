@@ -14,7 +14,7 @@ This repository contains the reproducible machine learning pipeline and stored m
 
 Open and run `pipeline_reproduction.ipynb` to reproduce predictions directly from stored model weights without re-training:
 
-1. **Automatic Stored Weight Loader:** Cell 1 reads `configs/weights_manifest.json` and downloads `28` `.pt` checkpoints plus `48` boosters from [GitHub Release `v1.0.0`](https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/tag/v1.0.0). Next, the loader verifies every `SHA-256` digest inside `./weights`.
+1. **Automatic Stored Weight Loader:** Cell 1 reads `configs/weights_manifest.json` and downloads `28` `.pt` checkpoints plus `52` boosters from [GitHub Release `v1.0.0`](https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/tag/v1.0.0). Next, the loader verifies every `SHA-256` digest inside `./weights`.
 2. **Out-of-the-Box Sample Execution:** Cells 2–5 normalize `samples/20140406195854Bh.jpeg` and build Dinkelbach targets from `samples/sample_annotations_20140406195854Bh.json`. Next, `src/inference_v4_panoptic.py` generates disjoint masks (`0` overlap) and computes official Panoptic Quality (`PQ = SQ * RQ`).
 
 ---
@@ -23,10 +23,10 @@ Open and run `pipeline_reproduction.ipynb` to reproduce predictions directly fro
 
 1. **Physical 3-Channel Solar Disk Normalization:** The preprocessor converts `2048 x 2048` H-alpha images into disk-percentile intensity, `16 x 16` CLAHE contrast, and `sigma = 18 px` limb-flattened absorption maps.
 2. **Dinkelbach Compromise Targets and Repulsion Seams:** The target builder computes signed-distance-field (`SDF`) median contours across `K` human annotators (`vals >= 0.35 * K`) and `5 px` repulsion seams (`p3`).
-3. **Channel-Aware 6-Backbone Streaming Ensemble:** The engine streams three 4-channel `v4` backbones (`ConvNeXt-Small`, `HRNet-W32`, `RegNetY-064`) and three 3-channel `v3` backbones (`EfficientNet-B4`, `DenseNet-169`, `SE-ResNeXt50`).
-4. **3-Channel Dinkelbach `YOLO11m-Seg` (`1024 px`):** Four fold checkpoints run on normalized 3-channel solar disks (`0.4031` standalone Out-Of-Fold `PQ`) and supply calibrated consensus proposals.
-5. **Unshaved Topological Proposals and Dual-Anchored LightGBM:** The proposal engine extracts crisp seam-cut, watershed, hysteresis, YOLO-bridged, and tip-tangent candidates (`[0, 1, 2, 3, 6, 7, 10]`). Two bagged 24-booster LightGBM ensembles (`0.60 * YOLO_GBDT + 0.40 * SEG_GBDT`) score `60` geometric, neural-ambiguity, and relational features without single-feature over-reliance.
-6. **Exact Connected-Component `MWIS` Packing:** A branch-and-bound Maximum-Weight Independent Set (`MWIS`) solver packs conflict components (`cut = 0.22`, `split_cost = 0.24`) and guarantees `0` overlapping pixels.
+3. **Channel-Aware 6-Backbone Dihedral Streaming:** The engine streams three 4-channel `v4` backbones (`8-view D4` TTA) and three 3-channel `v3` backbones (`4-view` and `2-view` flip TTA).
+4. **3-Channel Dinkelbach `YOLO11m-Seg` (`1024 px`):** Four fold checkpoints run on normalized 3-channel solar disks (`0.4031` standalone Out-Of-Fold `PQ`) and supply unbiased cross-fold consensus (`w_tot / M`).
+5. **Clean Topological Proposals and Dual-Generation LightGBM:** The extractor builds seam-cut, unsplit, Voronoi, bridge, consensus, and YOLO-union candidates (`[0, 1, 2, 3, 5, 6]`). Fifty-two LightGBM boosters (`0.65 * (0.55 * YOLO_GBDT + 0.45 * SEG_GBDT) + 0.35 * V3_GBDT`) score `60` features and reach `0.4641` Out-Of-Fold `PQ`.
+6. **Exact Connected-Component `MWIS` Packing:** A branch-and-bound Maximum-Weight Independent Set (`MWIS`) solver packs conflict components (`cut = 0.225`, `split_cost = 0.24`) and guarantees `0` overlapping pixels.
 
 ---
 
@@ -36,7 +36,7 @@ Open and run `pipeline_reproduction.ipynb` to reproduce predictions directly fro
 |---|---|
 | `pipeline_reproduction.ipynb` | Executed Jupyter notebook illustrating all pipeline stages with stored model weights |
 | `requirements.txt` | Pinned Python package versions for reproducible training and inference |
-| `configs/weights_manifest.json` | Release `v1.0.0` URLs and `SHA-256` checksums for all `28` `.pt` weights and `48` boosters |
+| `configs/weights_manifest.json` | Release `v1.0.0` URLs and `SHA-256` checksums for all `28` `.pt` weights and `52` boosters |
 | `configs/ensemble_v4_config.json` | Channel-aware ensemble weights, topological features, and `MWIS` thresholds |
 | `configs/clean_4fold_split.json` | Deterministic solar-day-grouped 4-fold split across all `707` training stems |
 | `configs/clean_val_split.json` | Deterministic `141`-stem holdout validation subset |
@@ -46,14 +46,14 @@ Open and run `pipeline_reproduction.ipynb` to reproduce predictions directly fro
 | `src/train_v3_panoptic_template.py` | 4-fold 3-channel consensus support segmentation trainer |
 | `src/train_v4_dinkelbach_yolo.py` | 4-fold 3-channel Dinkelbach `YOLO11m-Seg` (`1024 px`) instance trainer |
 | `src/fuse_v4_cross_arch.py` | 6-backbone Out-Of-Fold fusion, topological proposals, Dual-Anchored LightGBM, and `MWIS` |
-| `src/stage_v4_dataset.py` | Packages checkpoints, `48` LightGBM boosters, and JSON metadata into an offline bundle |
+| `src/stage_v4_dataset.py` | Packages checkpoints, `52` LightGBM boosters, and JSON metadata into an offline bundle |
 | `src/inference_v4_panoptic.py` | Multi-GPU and CPU dynamic inference engine with process-isolated scoring and `0`-overlap check |
 | `scripts/reproduce_infer.sh` | Single-command dynamic test inference using stored weights and pixel-disjointness verifier |
 | `scripts/reproduce_train.sh` | Single-command end-to-end 4-fold training and bundle staging script |
 | `scripts/evaluate_official_pq.py` | Official Panoptic Quality (`PQ = SQ * RQ`) evaluator and diagnostic plotter |
 | `scripts/plot_pipeline_architecture.py` | Generates the vector architecture flowchart (`Figure 1`) for the technical report |
 | `scripts/plot_progression_ablation.py` | Generates the vector ablation progression figure for the technical report |
-| `technical_report/` | Official ACM `sigconf` LaTeX source (`main.tex`), BibTeX (`main.bib`), figures, and 4-page PDF |
+| `technical_report/` | Official ACM `sigconf` LaTeX source (`main.tex`), BibTeX (`main.bib`), figures, and 6-page PDF |
 
 ---
 
@@ -72,18 +72,18 @@ pip install -r requirements.txt
 
 * **Hardware Requirements:**
   * **Training:** `1x` or `2x` NVIDIA GPU with `>= 16 GB` VRAM (`Tesla P100`, `T4`, `L4`, or `A100`) and `32 GB` system RAM.
-  * **Inference:** `2x` NVIDIA `T4` GPU (`54.2 min` for all `28` checkpoints) or `4`-vCPU host (`< 56 min` in YOLO-ROI CPU mode) with `< 3.5 GB` RAM.
+  * **Inference:** `2x` NVIDIA `T4` GPU (`8-view D4` TTA across `28` checkpoints) or `4`-vCPU host (`< 56 min` in YOLO-ROI CPU mode) with `< 3.5 GB` RAM.
 
 ---
 
 ## 5. Reproduce Dynamic Test Inference Without Re-Training
 
 1. Run Cell 1 of `pipeline_reproduction.ipynb` to download and verify stored weights in `./weights`.
-2. Run `scripts/reproduce_infer.sh` to reproduce the `v4.6` 28-model ensemble (`Ref 58364478`).
+2. Run `scripts/reproduce_infer.sh` to reproduce the `v4` 28-model ensemble (`Ref 58364478`).
 3. Run `scripts/reproduce_infer_v3.sh` to reproduce the `v3` 4-family ensemble (`Ref 58250373`).
 
 ```bash
-# Reproduce v4.6 28-model submission (Ref 58364478)
+# Reproduce v4 28-model submission (Ref 58364478)
 BUNDLE_DIR=./weights \
 TEST_DIR=/path/to/MAGFiLO_1.0_Kaggle_2026/test/test_images \
 OUT_CSV=./submission.csv \

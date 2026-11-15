@@ -1,7 +1,7 @@
 """
 Generate publication-grade 2-panel vector PDF (`progression_ablation.pdf`) for the technical report:
   (a) Leak-free 707-stem OOF Panoptic Quality (`PQ`), Segmentation Quality (`SQ`), and Val-141 `PQ` progression.
-  (b) Multi-Annotator (`445` stems) vs Single-Annotator (`262` stems) OOF `PQ` across supervision regimes.
+  (b) Multi-Annotator (`296` stems) vs Single-Annotator (`411` stems) OOF `PQ` across supervision regimes.
 """
 
 from __future__ import annotations
@@ -37,9 +37,9 @@ def main() -> None:
         "v4 HRNet-W32\n(4-ch U-Net)",
         "v3 4-Family\nEnsemble",
         "v4 ConvNeXt-S\n(4-ch Solo)",
-        "v4.6 6-Family +\n3-ch YOLO + MWIS",
+        "v4.8 6-Family +\n52-GBDT + MWIS",
     ]
-    oof_pqs = [0.3680, 0.3627, 0.4031, 0.4248, 0.4437, 0.4523, 0.4541, 0.4570, 0.4633]
+    oof_pqs = [0.3680, 0.3627, 0.4031, 0.4248, 0.4437, 0.4523, 0.4541, 0.4570, 0.4641]
     colors = [
         "#8c8c8c",
         "#b4c7e7",
@@ -68,7 +68,7 @@ def main() -> None:
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontsize=7.2, rotation=22, ha="right")
     ax1.set_ylabel("707-Stem Out-Of-Fold PQ", fontsize=9.5, fontweight="bold")
-    ax1.set_title("(a) Leak-Free 4-Fold OOF Progression (707 Stems, 1,949 Records)", fontsize=9.8, fontweight="bold")
+    ax1.set_title("(a) Leak-Free 4-Fold OOF Progression (707 Stems, 1,154 Records)", fontsize=9.8, fontweight="bold")
     ax1.grid(axis="y", linestyle="--", alpha=0.45)
 
     # Panel (b): Multi-Annotator vs Single-Annotator & SQ comparison
@@ -76,16 +76,16 @@ def main() -> None:
         "v3 EffNet-B4\n(Union)",
         "v3 4-Family\nEnsemble",
         "v4 ConvNeXt-S\n(Dink. Solo)",
-        "v4.6 6-Family\n+ Dual-GBDT MWIS",
+        "v4.8 6-Family\n+ 52-GBDT MWIS",
     ]
-    mul_pq = [0.4112, 0.4482, 0.4539, 0.4621]
-    sng_pq = [0.4479, 0.4641, 0.4622, 0.4654]
-    val141 = [0.4385, 0.4648, 0.4696, 0.4786]
+    mul_pq = [0.4112, 0.4482, 0.4539, 0.4629]
+    sng_pq = [0.4479, 0.4641, 0.4622, 0.4660]
+    val141 = [0.4385, 0.4648, 0.4696, 0.4762]
 
     xr = np.arange(len(regimes))
     w = 0.25
-    b1 = ax2.bar(xr - w, mul_pq, width=w, color="#1f4e79", edgecolor="black", linewidth=0.5, label="Multi-Annotator (445)")
-    b2 = ax2.bar(xr, sng_pq, width=w, color="#2e8b57", edgecolor="black", linewidth=0.5, label="Single-Annotator (262)")
+    b1 = ax2.bar(xr - w, mul_pq, width=w, color="#1f4e79", edgecolor="black", linewidth=0.5, label="Multi-Annotator (296)")
+    b2 = ax2.bar(xr, sng_pq, width=w, color="#2e8b57", edgecolor="black", linewidth=0.5, label="Single-Annotator (411)")
     b3 = ax2.bar(xr + w, val141, width=w, color="#c55a11", edgecolor="black", linewidth=0.5, label="Holdout Val-141")
 
     for grp in (b1, b2, b3):

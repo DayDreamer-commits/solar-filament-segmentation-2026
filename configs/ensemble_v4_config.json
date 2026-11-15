@@ -11,7 +11,7 @@
         "unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold2.pt",
         "unet_tu_convnext_small_fb_in22k_ft_in1k_384_fold3.pt"
       ],
-      "tta_views": 4
+      "tta_views": 8
     },
     {
       "arch": "Unet",
@@ -24,7 +24,7 @@
         "unet_tu_hrnet_w32_ms_in1k_fold2.pt",
         "unet_tu_hrnet_w32_ms_in1k_fold3.pt"
       ],
-      "tta_views": 4
+      "tta_views": 8
     },
     {
       "arch": "FPN",
@@ -37,7 +37,7 @@
         "fpn_timm_regnety_064_fold2.pt",
         "fpn_timm_regnety_064_fold3.pt"
       ],
-      "tta_views": 4
+      "tta_views": 8
     },
     {
       "arch": "Unet",
@@ -50,7 +50,7 @@
         "unet_efficientnet_b4_fold2.pt",
         "unet_efficientnet_b4_fold3.pt"
       ],
-      "tta_views": 2
+      "tta_views": 4
     },
     {
       "arch": "UnetPlusPlus",
@@ -76,7 +76,7 @@
         "unet_resnext50_32x4d_fold2.pt",
         "unet_resnext50_32x4d_fold3.pt"
       ],
-      "tta_views": 2
+      "tta_views": 4
     }
   ],
   "yolo_ckpts": [
@@ -258,22 +258,23 @@
     "seg_selector_fold3_m4.txt",
     "seg_selector_fold3_m5.txt"
   ],
-  "yolo_gbdt_weight": 0.6,
+  "yolo_gbdt_weight": 0.55,
+  "v3_gbdt_weight": 0.35,
   "best_sources": [
     0,
     1,
     2,
     3,
-    6,
-    7,
-    10
+    5,
+    6
   ],
-  "best_cut": 0.22,
+  "best_cut": 0.225,
+  "v7_cut": 0.225,
   "split_cost": 0.24,
-  "tta_views": 4,
-  "oof_PQ": 0.46330585975622307,
-  "oof_SQ": 0.686822942776833,
-  "oof_RQ": 0.6745637498407846,
-  "nested_oof_PQ": 0.4625,
-  "val141_PQ": 0.47863639762674703
+  "tta_views": 8,
+  "oof_PQ": 0.4641,
+  "oof_SQ": 0.6870,
+  "oof_RQ": 0.6755,
+  "nested_oof_PQ": 0.4628,
+  "val141_PQ": 0.4762
 }

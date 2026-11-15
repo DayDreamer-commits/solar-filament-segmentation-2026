@@ -1,19 +1,21 @@
 """
-Solar Filament Segmentation 2026 - v4.6 Cross-Generation + 3-Ch Dinkelbach YOLO + Exact MWIS Panoptic Inference.
+Solar Filament Segmentation 2026 - v4.8 Dual-Generation 8-View D4 + Calibrated 3-Ch YOLO + Exact MWIS Panoptic Inference.
 
-100% dynamic runtime neural inference (`enable_gpu: true`, `enable_internet: false`):
-  1. Multi-GPU Process Isolation: when `nvidia-smi -L` detects `>= 2` GPUs (2x T4), spawns 2
-     isolated OS subprocesses (`CUDA_VISIBLE_DEVICES=0` and `CUDA_VISIBLE_DEVICES=1`),
-     halving wall-clock runtime with zero shared CUDA/cuDNN state.
-  2. O(1)-Memory Channel-Aware Welford Streaming (`CHUNK_SIZE = 24`):
-     - `p0` (Dinkelbach silhouette) weighted by `p0_weight` to preserve crisp boundaries (`SQ ~ 0.688`).
-     - `p1, p2` (consensus & interior distance spine) weighted across all 6 diverse backbones (`weight`).
+100% dynamic runtime neural inference (`enable_internet: false`):
+  1. Process-Isolated Hardware Sharding:
+     - Multi-GPU (`nvidia-smi -L >= 2`, e.g. 2x T4): spawns 2 isolated OS workers (`CUDA_VISIBLE_DEVICES=0` and `1`),
+       running all 28 checkpoints with full 8-view Dihedral D4 TTA on `v4` backbones (`4`-view/`2`-view on `v3`).
+     - 4-vCPU Host (`n_hw_gpus == 0`): benchmarks host SIMD throughput (`bf16`/`fp32`), packs native-scale YOLO/H-alpha
+       active regions into stride-32 ROIs (`pad=64`), and streams calibrated cross-generation families in `< 56m`.
+  2. O(1)-Memory Channel-Aware Welford Streaming (`CHUNK_SIZE = 24` GPU / `12` CPU):
+     - `p0` (Dinkelbach silhouette) weighted by `p0_weight` across crisp `v4` backbones (`SQ ~ 0.687`).
+     - `p1, p2` (consensus & interior distance spine) weighted across all active backbones (`weight`).
      - `p3` (5px repulsion seam) weighted across 4-ch `v4` backbones.
-     - `p0_v3` (Tversky recall map) tracked from 3-ch `v3` families to expose neural multi-annotator
-       ambiguity features (`p0_v3_mean`, `p0_v3_gap`).
-  3. Calibrated 4-Fold 3-Ch `YOLO11m-Seg` Consensus (`ymat >= 0.35`, `w_tot / sqrt(k * M)` calibration).
-  4. Unshaved Topological Proposals (`src = 0..10`) + 60 Relational Features + Bagged LightGBM +
-     Exact Dinkelbach `MWIS` Disjoint Set Packing (`cut` + `split_cost`, `overlap_total == 0`).
+     - `p0_v3` (Tversky union recall map) tracked across 3-ch `v3` backbones to expose neural ambiguity (`p0_v3_gap`).
+  3. Unbiased Multi-Fold 3-Ch `YOLO11m-Seg` Consensus (`ymat >= 0.48`, `w_tot / M` expectation calibration).
+  4. Clean Topological Proposals (`[0, 1, 2, 3, 5, 6]`) + Dual-Generation Bagged LightGBM
+     (`0.65 * (0.55 * v4_YOLO_GBDT_24 + 0.45 * v4_SEG_GBDT_24) + 0.35 * v3_BayesGBDT_4`, `0.4641` 707-OOF PQ) +
+     Exact Dinkelbach `MWIS` Disjoint Set Packing (`cut = 0.225`, `split_cost = 0.24`, `overlap_total == 0`).
 """
 
 from __future__ import annotations
@@ -33,6 +35,15 @@ from pathlib import Path
 H = W = 2048
 CHUNK_SIZE = 24
 T0 = time.time()
+
+V3_FEATURES = [
+    "source", "area", "log_area", "bw", "bh", "fill", "aspect", "disk_radius",
+    "p0_mean", "p0_q25", "p0_q75", "p0_max", "p0_border_drop",
+    "p1_mean", "p1_q25", "p1_q75", "p1_max", "p1_p0_ratio",
+    "p2_mean", "p2_max", "n_cores", "n_p1_cores", "cc_iou", "image_cc_count",
+    "p0_arch_std", "p1_arch_min",
+    "yolo_iou", "yolo_conf", "n_yolo_sub", "yolo_contain", "yolo_span_ccs", "yolo_area_ratio",
+]
 
 
 def log(*args) -> None:
@@ -56,6 +67,8 @@ def install_offline_wheels() -> None:
 def detect_hw_gpus() -> int:
     if os.environ.get("SF_FORCE_2SHARD_TEST") == "1":
         return 2
+    if os.environ.get("SF_FORCE_CPU_ONLY") == "1":
+        return 0
     try:
         smi = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True)
         return len([ln for ln in smi.stdout.strip().splitlines() if ln.strip()]) if smi.returncode == 0 else 0
@@ -93,16 +106,25 @@ def run_lgb_score_subproc(in_npz: str, out_npy: str) -> None:
     d = np.load(in_npz, allow_pickle=False)
     X_s1 = d["X_s1"]
     X_seg = d["X_seg"]
+    X_v3 = d["X_v3"]
     sel_paths = [str(p) for p in d["sel_paths"]]
     seg_sel_paths = [str(p) for p in d["seg_sel_paths"]]
+    v3_sel_paths = [str(p) for p in d["v3_sel_paths"]]
     alpha_g = float(d["alpha_g"][0])
+    w_v3 = float(d["w_v3"][0])
 
     p_y = sum(lgb.Booster(model_file=p).predict(X_s1, num_threads=1) for p in sel_paths) / float(len(sel_paths))
     if seg_sel_paths and X_seg.shape[1] > 0:
         p_s = sum(lgb.Booster(model_file=p).predict(X_seg, num_threads=1) for p in seg_sel_paths) / float(len(seg_sel_paths))
-        preds = alpha_g * p_y + (1.0 - alpha_g) * p_s
+        p_v4 = alpha_g * p_y + (1.0 - alpha_g) * p_s
     else:
-        preds = p_y
+        p_v4 = p_y
+
+    if v3_sel_paths and X_v3.shape[1] > 0 and w_v3 > 0.0:
+        p_v3 = sum(lgb.Booster(model_file=p).predict(X_v3, num_threads=1) for p in v3_sel_paths) / float(len(v3_sel_paths))
+        preds = (1.0 - w_v3) * p_v4 + w_v3 * p_v3
+    else:
+        preds = p_v4
     np.save(out_npy, np.asarray(preds, dtype=np.float64))
 
 
@@ -142,23 +164,34 @@ def run_cpu_calibrate_subproc(out_cfg_json: str) -> None:
                 if p_in.name not in asset_index or "v4" in str(p_in):
                     asset_index[p_in.name] = p_in
 
+    extra_dirs = [
+        Path(d_s)
+        for d_s in os.environ.get("SF_EXTRA_ASSET_DIRS", "").split(os.pathsep)
+        if d_s.strip()
+    ]
+
     def resolve_asset(rel_name: str) -> Path:
         cand = bundle_dir / rel_name
         if cand.exists():
             return cand
+        for ex_d in extra_dirs:
+            ex_c = ex_d / rel_name
+            if ex_c.exists():
+                return ex_c
         if rel_name in asset_index:
             return asset_index[rel_name]
         raise FileNotFoundError(f"Missing model asset {rel_name} in {bundle_dir} and /kaggle/input")
 
     test_files = locate_test_images()
-    n_sh_tot = 2 if (len(test_files) >= 2 and (sys.platform != "darwin" or os.environ.get("SF_FORCE_CPU_2SHARD_TEST") == "1")) else 1
-    n_shard = max(1, math.ceil(len(test_files) / float(n_sh_tot)))
+    n_imgs = len(test_files)
+    n_sh_tot = 2 if (n_imgs >= 2 and (sys.platform != "darwin" or os.environ.get("SF_FORCE_CPU_2SHARD_TEST") == "1")) else 1
+    n_shard = max(1, math.ceil(n_imgs / float(n_sh_tot)))
     smoke_fast = os.environ.get("SF_SMOKE_FAST") == "1"
 
     fold_prio_map = {
         "convnext": [0, 1, 2, 3],
-        "hrnet": [0, 1, 3, 2],
         "regnety": [1, 0, 2, 3],
+        "hrnet": [0, 1, 3, 2],
         "efficientnet": [2, 0, 1, 3],
         "resnext": [3, 1, 0, 2],
     }
@@ -171,27 +204,32 @@ def run_cpu_calibrate_subproc(out_cfg_json: str) -> None:
         return list(ck_list)
 
     raw_groups = [g for g in ens_cfg["arch_groups"] if g["arch"] != "UnetPlusPlus"]
-    yolo_rels = [yrel for yrel in ens_cfg.get("yolo_ckpts", []) if (bundle_dir / yrel).exists() or yrel in asset_index]
+    yolo_rels = [
+        yrel for yrel in ens_cfg.get("yolo_ckpts", [])
+        if (bundle_dir / yrel).exists() or any((ed / yrel).exists() for ed in extra_dirs) or yrel in asset_index
+    ]
     yolo_imgsz = int(ens_cfg.get("yolo_imgsz", 1024))
 
-    if smoke_fast or len(test_files) <= 4:
+    if smoke_fast or n_imgs <= 4:
         cal_groups = []
-        target_keys = ("regnety", "resnext", "hrnet") if smoke_fast else ("convnext", "hrnet", "regnety", "efficientnet")
+        keep_keys = ("regnety", "resnext", "hrnet") if smoke_fast else ("convnext", "hrnet", "regnety", "efficientnet")
         for g in raw_groups:
-            if any(k in g["backbone"].lower() for k in target_keys):
+            if any(k in g["backbone"].lower() for k in keep_keys):
                 g_copy = dict(g)
                 g_copy["ckpts"] = ordered_ckpts(g["backbone"], g["ckpts"])[:1]
                 g_copy["tta_views"] = 1
                 cal_groups.append(g_copy)
         out_cfg = dict(ens_cfg)
         out_cfg["orig_bundle_dir"] = str(bundle_dir)
+        out_cfg["cpu_calibrated"] = True
         out_cfg["arch_groups"] = cal_groups
         out_cfg["yolo_ckpts"] = yolo_rels[: (1 if smoke_fast else min(2, len(yolo_rels)))]
         out_cfg["tta_views"] = 1
-        out_cfg["best_cut"] = 0.22
+        out_cfg["best_cut"] = 0.225
+        out_cfg["v7_cut"] = 0.225
         out_cfg["split_cost"] = 0.24
         Path(out_cfg_json).write_text(json.dumps(out_cfg, indent=2))
-        log(f"CPU ROI fast calibration (n_imgs={len(test_files)}) selected {len(cal_groups)} families -> {out_cfg_json}")
+        log(f"CPU ROI fast calibration (n_imgs={n_imgs}) selected {len(cal_groups)} families -> {out_cfg_json}")
         return
 
     img0 = cv2.imread(str(test_files[0]), cv2.IMREAD_GRAYSCALE)
@@ -200,7 +238,7 @@ def run_cpu_calibrate_subproc(out_cfg_json: str) -> None:
     x_warm = torch.zeros((1, 3, 256, 256), dtype=torch.float32)
     x_bench = torch.zeros((1, 3, 768, 1024), dtype=torch.float32)
     contention_factor = 1.78 if n_sh_tot >= 2 else 1.05
-    roi_scale_vs_bench = 1.25  # (768*1024)/(2048*2048) = 0.1875 DRAM-realistic ROI budget + 25% loop/feather overhead
+    roi_scale_vs_bench = 1.25
     max_cpu_ckpts = int(os.environ.get("SF_MAX_CPU_CKPTS", "4"))
 
     dt_yolo = 0.0
@@ -215,20 +253,21 @@ def run_cpu_calibrate_subproc(out_cfg_json: str) -> None:
         dt_yolo = max(0.05, time.time() - t_y0)
         del ym
         gc.collect()
-        if n_shard * 3 * dt_yolo * contention_factor <= 500.0:
+        if n_shard * 3 * dt_yolo * contention_factor <= 560.0:
             n_yolo = min(3, len(yolo_rels))
-        elif n_shard * 2 * dt_yolo * contention_factor <= 500.0:
+        elif n_shard * 2 * dt_yolo * contention_factor <= 780.0:
             n_yolo = min(2, len(yolo_rels))
         else:
             n_yolo = 1
 
+    # Efficiency-calibrated CPU ranking: ConvNeXt-S (highest SQ) + RegNetY-064 (fast FPN) + EffNet-B4 (v3 recall)
     def fam_quality_rank(backbone_str: str) -> int:
         bb_l = backbone_str.lower()
         if "convnext" in bb_l:
             return 0
-        if "hrnet" in bb_l:
-            return 1
         if "regnety" in bb_l:
+            return 1
+        if "hrnet" in bb_l:
             return 2
         if "efficientnet" in bb_l:
             return 3
@@ -271,7 +310,7 @@ def run_cpu_calibrate_subproc(out_cfg_json: str) -> None:
         })
         log(f"CPU ROI bench {g['arch']}/{g['backbone']} (768x1024={dt_640:.2f}s, bf16={cpu_bf16_ok}) -> {est_ckpt_sec / 60.0:.2f}m/ckpt")
 
-    target_sec = float(os.environ.get("SF_CPU_BUDGET_MIN", "47.0")) * 60.0
+    target_sec = float(os.environ.get("SF_CPU_BUDGET_MIN", "48.0")) * 60.0
     fixed_sec = 90.0 + n_shard * (n_yolo * dt_yolo * contention_factor + 0.30)
     seg_budget_sec = max(600.0, target_sec - fixed_sec)
     used_sec = 0.0
@@ -320,15 +359,17 @@ def run_cpu_calibrate_subproc(out_cfg_json: str) -> None:
 
     out_cfg = dict(ens_cfg)
     out_cfg["orig_bundle_dir"] = str(bundle_dir)
+    out_cfg["cpu_calibrated"] = True
     out_cfg["arch_groups"] = cal_groups
     out_cfg["yolo_ckpts"] = yolo_rels[:n_yolo]
     out_cfg["tta_views"] = 1
-    out_cfg["best_cut"] = 0.22
+    out_cfg["best_cut"] = 0.225
+    out_cfg["v7_cut"] = 0.225
     out_cfg["split_cost"] = 0.24
     Path(out_cfg_json).write_text(json.dumps(out_cfg, indent=2))
     tot_ck = sum(len(g["ckpts"]) for g in cal_groups)
     log(
-        f"CPU ROI calibration selected {len(cal_groups)} families ({tot_ck} seg ckpts + {n_yolo} YOLO ckpts, cut=0.22/split=0.24); "
+        f"CPU ROI calibration selected {len(cal_groups)} families ({tot_ck} seg ckpts + {n_yolo} YOLO ckpts, cut=0.225/split=0.24); "
         f"projected shard wall-clock = {(fixed_sec + used_sec) / 60.0:.1f}m (shards={n_sh_tot})"
     )
 
@@ -353,7 +394,6 @@ def run_worker_shard() -> None:
     import pandas as pd
     from pycocotools import mask as mu
     import torch
-    import torch.nn as nn
     import torch.nn.functional as F
     import segmentation_models_pytorch as smp
 
@@ -553,7 +593,16 @@ def run_worker_shard() -> None:
     cpu_bf16_ok = cpu_has_fast_bf16()
 
     @torch.no_grad()
-    def forward_single_image_batched(model, n_out_ch: int, dev: torch.device, x_cpu: torch.Tensor, tta_views: int, smoke_fast: bool) -> np.ndarray:
+    def forward_single_image_batched(
+        model,
+        arch_name: str,
+        backbone: str,
+        n_out_ch: int,
+        dev: torch.device,
+        x_cpu: torch.Tensor,
+        tta_views: int,
+        smoke_fast: bool,
+    ) -> np.ndarray:
         h_in, w_in = int(x_cpu.shape[2]), int(x_cpu.shape[3])
         x0 = x_cpu.to(dev, non_blocking=(dev.type == "cuda"))
         if smoke_fast or tta_views <= 1:
@@ -565,42 +614,54 @@ def run_worker_shard() -> None:
         else:
             views_meta = [(tr_flag, fl) for tr_flag in (False, True) for fl in ([], [2], [3], [2, 3])]
 
-        acc = torch.zeros((1, n_out_ch, h_in, w_in), device=dev, dtype=torch.float32)
-        view_bs = 1
+        if dev.type == "cuda" and not smoke_fast:
+            pref_bs = 2 if (arch_name == "UnetPlusPlus" or "hrnet" in backbone) else 4
+            view_bs = min(len(views_meta), pref_bs)
+        else:
+            view_bs = 1
 
-        for v0 in range(0, len(views_meta), view_bs):
-            sub_meta = views_meta[v0:v0 + view_bs]
-            v_list = []
-            for tr_flag, fl in sub_meta:
-                vt = x0.transpose(2, 3) if tr_flag else x0
-                if fl:
-                    vt = torch.flip(vt, fl)
-                v_list.append(vt[0])
-            xb = torch.stack(v_list, dim=0).contiguous()
-            del v_list
+        def _run_views(bs: int) -> torch.Tensor:
+            acc_t = torch.zeros((1, n_out_ch, h_in, w_in), device=dev, dtype=torch.float32)
+            for v0 in range(0, len(views_meta), bs):
+                sub_meta = views_meta[v0:v0 + bs]
+                v_list = []
+                for tr_flag, fl in sub_meta:
+                    vt = x0.transpose(2, 3) if tr_flag else x0
+                    if fl:
+                        vt = torch.flip(vt, fl)
+                    v_list.append(vt[0])
+                xb = torch.stack(v_list, dim=0).contiguous()
+                del v_list
 
-            if smoke_fast and dev.type == "cpu":
-                sh_h = max(128, (h_in // 2 // 32) * 32)
-                sh_w = max(128, (w_in // 2 // 32) * 32)
-                bx_s = F.interpolate(xb, size=(sh_h, sh_w), mode="bilinear", align_corners=False)
-                pb = F.interpolate(torch.sigmoid(model(bx_s).float()), size=(h_in, w_in), mode="bilinear", align_corners=False)
-            elif dev.type == "cuda":
-                with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
+                if smoke_fast and dev.type == "cpu":
+                    sh_h = max(128, (h_in // 2 // 32) * 32)
+                    sh_w = max(128, (w_in // 2 // 32) * 32)
+                    bx_s = F.interpolate(xb, size=(sh_h, sh_w), mode="bilinear", align_corners=False)
+                    pb = F.interpolate(torch.sigmoid(model(bx_s).float()), size=(h_in, w_in), mode="bilinear", align_corners=False)
+                elif dev.type == "cuda":
+                    with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
+                        pb = torch.sigmoid(model(xb).float())
+                elif cpu_bf16_ok:
+                    with torch.amp.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=True):
+                        pb = torch.sigmoid(model(xb).float())
+                else:
                     pb = torch.sigmoid(model(xb).float())
-            elif cpu_bf16_ok:
-                with torch.amp.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=True):
-                    pb = torch.sigmoid(model(xb).float())
-            else:
-                pb = torch.sigmoid(model(xb).float())
 
-            for k_v, (tr_flag, fl) in enumerate(sub_meta):
-                pk = pb[k_v:k_v + 1]
-                if fl:
-                    pk = torch.flip(pk, fl)
-                if tr_flag:
-                    pk = pk.transpose(2, 3)
-                acc += pk
-            del xb, pb
+                for k_v, (tr_flag, fl) in enumerate(sub_meta):
+                    pk = pb[k_v:k_v + 1]
+                    if fl:
+                        pk = torch.flip(pk, fl)
+                    if tr_flag:
+                        pk = pk.transpose(2, 3)
+                    acc_t += pk
+                del xb, pb
+            return acc_t
+
+        try:
+            acc = _run_views(view_bs)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            acc = _run_views(1)
 
         out = (acc[0] / float(len(views_meta))).clamp(0.0, 1.0).cpu().numpy()
         del acc, x0
@@ -659,6 +720,8 @@ def run_worker_shard() -> None:
 
     def forward_rois_image(
         model,
+        arch_name: str,
+        backbone: str,
         n_out_ch: int,
         dev: torch.device,
         x_cpu: torch.Tensor,
@@ -670,11 +733,11 @@ def run_worker_shard() -> None:
         if not rois:
             return out_sum
         if len(rois) == 1 and rois[0] == (0, 0, W, H):
-            return forward_single_image_batched(model, n_out_ch, dev, x_cpu, tta_views, smoke_fast)
+            return forward_single_image_batched(model, arch_name, backbone, n_out_ch, dev, x_cpu, tta_views, smoke_fast)
         w_acc = np.zeros((H, W), dtype=np.float32)
         for rx0, ry0, rx1, ry1 in rois:
             rh, rw = ry1 - ry0, rx1 - rx0
-            p_c = forward_single_image_batched(model, n_out_ch, dev, x_cpu[:, :, ry0:ry1, rx0:rx1], tta_views, smoke_fast)
+            p_c = forward_single_image_batched(model, arch_name, backbone, n_out_ch, dev, x_cpu[:, :, ry0:ry1, rx0:rx1], tta_views, smoke_fast)
             w2d = make_feather_weight(rh, rw, rx0, ry0, rx1, ry1)
             out_sum[ry0:ry1, rx0:rx1] += p_c * w2d[:, :, None]
             w_acc[ry0:ry1, rx0:rx1] += w2d
@@ -711,14 +774,12 @@ def run_worker_shard() -> None:
             if r_raw is None:
                 continue
             cc0_items.append((r_raw, int(mc_raw.sum())))
-            # Family 0: Unshaved Dinkelbach seam-cut component
             proposals.append((0, r_raw, bx, by, mc_raw, 0.0))
 
             p1_crop = p1[by:by + bh, bx:bx + bw]
             p2_crop = p2[by:by + bh, bx:bx + bw]
             p3_crop = p3[by:by + bh, bx:bx + bw]
 
-            # Family 7: Softer Seam-Split Proposals (`(mc_raw > 0) & (p3 < 0.36)`) - unshaved
             if seam_w_sum > 0 and area >= 150 and float(p3_crop[mc_raw > 0].max()) >= 0.36:
                 sub_s = ((mc_raw > 0) & (p3_crop < 0.36)).astype(np.uint8)
                 nc_s, lab_s, st_s, _ = cv2.connectedComponentsWithStats(sub_s, connectivity=8)
@@ -730,7 +791,6 @@ def run_worker_shard() -> None:
                         if rs is not None:
                             proposals.append((7, rs, bx, by, sp, 0.0))
 
-            # Family 8: Optional Calibrated / Anti-Bloat Tight Consensus
             mc_cal = calibrate_crop_mask(mc_raw, p1_crop, thr=0.44, min_ret=0.72)
             if int(mc_cal.sum()) < int(0.93 * area):
                 r_cal = encode_crop_rle(mc_cal, bx, by)
@@ -751,7 +811,6 @@ def run_worker_shard() -> None:
                             if rt is not None:
                                 proposals.append((8, rt, bx, by, mt, 0.0))
 
-            # Family 2: Seam-aware Spine-Core Voronoi Watershed Splits - unshaved
             if area >= 220:
                 core_bin = (((p2_crop >= 0.42) | (p1_crop >= 0.48)) & (mc_raw > 0) & (p3_crop < 0.36 if seam_w_sum > 0 else True)).astype(np.uint8)
                 nc_core, lab_core, st_core, cen_core = cv2.connectedComponentsWithStats(core_bin, connectivity=8)
@@ -778,7 +837,6 @@ def run_worker_shard() -> None:
 
         cc_count_050 = len(cc0_items)
 
-        # Family 1: Unsplit `p0 >= 0.50` components where `p3 >= 0.45` cut a seam
         if seam_w_sum > 0:
             ncc_u, lab_u, st_u, _ = cv2.connectedComponentsWithStats((p0 >= 0.50).astype(np.uint8), connectivity=8)
             for k in range(1, ncc_u):
@@ -793,7 +851,6 @@ def run_worker_shard() -> None:
                     if ru is not None:
                         proposals.append((1, ru, bx, by, mc_u, 0.0))
 
-        # Family 5: Direct consensus p1 >= 0.45 connected components
         ncc1, lab1, st1, _ = cv2.connectedComponentsWithStats((p1 >= 0.45).astype(np.uint8), connectivity=8)
         for k in range(1, ncc1):
             bx, by, bw, bh, area = map(int, st1[k])
@@ -804,7 +861,6 @@ def run_worker_shard() -> None:
             if r1 is not None:
                 proposals.append((5, r1, bx, by, mc1, 0.0))
 
-        # Family 9: Diffuse / Faint Recall Hysteresis
         p0_rec = 0.70 * p0 + 0.30 * p0_v3
         seam_ok_lo = (p3 < 0.40) if seam_w_sum > 0 else True
         ncc_lo, lab_lo, st_lo, _ = cv2.connectedComponentsWithStats(((p0_rec >= 0.25) & seam_ok_lo).astype(np.uint8), connectivity=8)
@@ -822,7 +878,6 @@ def run_worker_shard() -> None:
                 if rf is not None:
                     proposals.append((9, rf, bx, by, mf, 0.0))
 
-        # Family 10: Oriented Principal-Tip-Tangent Linker across 4..46px gaps
         n_el = len(elong_comps)
         if n_el >= 2:
             adj_links: dict[int, list[tuple[int, float, float, float, float]]] = defaultdict(list)
@@ -903,7 +958,6 @@ def run_worker_shard() -> None:
                             if rl3 is not None:
                                 proposals.append((10, rl3, ux0, uy0, canvas, 0.0))
 
-        # Family 3: Seam-Guarded Hysteresis Gap-Bridging - unshaved
         k_bridge = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
         seam_ok_b = (p3 < 0.40) if seam_w_sum > 0 else True
         bridged = ((cv2.morphologyEx(fg_seam_cut, cv2.MORPH_CLOSE, k_bridge) > 0) & (p0 >= 0.28) & seam_ok_b).astype(np.uint8) | fg_seam_cut
@@ -920,7 +974,7 @@ def run_worker_shard() -> None:
                 if rle is not None:
                     proposals.append((3, rle, bx, by, mc, 0.0))
 
-        # Calibrated 4-Fold Consensus YOLO Clustering (`ymat >= 0.35`, `w_tot / sqrt(k * M)`)
+        # Unbiased Multi-Fold Consensus YOLO Clustering (`ymat >= 0.48`, `cal_sc = w_tot / M` expectation matching OOF)
         yolo_rles, yolo_confs, yolo_areas = [], [], []
         if raw_y and n_yolo_models > 0:
             k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -937,12 +991,12 @@ def run_worker_shard() -> None:
                 seen_folds = {raw_y_sorted[yi][1]}
                 used_y[yi] = True
                 for yj in range(yi + 1, len(raw_y_sorted)):
-                    if not used_y[yj] and raw_y_sorted[yj][1] not in seen_folds and ymat[yi, yj] >= 0.35:
+                    if not used_y[yj] and raw_y_sorted[yj][1] not in seen_folds and ymat[yi, yj] >= 0.48:
                         grp_idx.append(yj)
                         seen_folds.add(raw_y_sorted[yj][1])
                         used_y[yj] = True
                 w_tot_y = sum(raw_y_sorted[yj][0] for yj in grp_idx)
-                cal_sc = w_tot_y / math.sqrt(float(len(grp_idx)) * denom_y)
+                cal_sc = w_tot_y / denom_y
                 if cal_sc < 0.03:
                     continue
                 if len(grp_idx) >= 2:
@@ -1078,7 +1132,7 @@ def run_worker_shard() -> None:
                     y_iou = float(yi_mat[idx_p].max())
                     y_conf = max(
                         float(orig_yconf),
-                        float(max((sc for sc, jv in zip(yolo_confs, yi_mat[idx_p]) if jv >= 0.45), default=0.0)),
+                        float(max((sc for sc, jv in zip(yolo_confs, yi_mat[idx_p]) if jv >= 0.48), default=0.0)),
                     )
                     valid_y = yc_arr >= 0.16
                     n_yolo_sub = int(((inter_py[idx_p, valid_y] / np.maximum(ya_arr[valid_y], 1.0)) >= 0.55).sum()) if np.any(valid_y) else 0
@@ -1262,7 +1316,7 @@ def run_worker_shard() -> None:
             chosen.append(r)
         return chosen
 
-    has_cuda = torch.cuda.is_available()
+    has_cuda = (os.environ.get("SF_FORCE_CPU_ONLY") != "1") and torch.cuda.is_available()
     if has_cuda:
         torch.backends.cudnn.benchmark = True
         torch.set_num_threads(1)
@@ -1284,30 +1338,89 @@ def run_worker_shard() -> None:
         cfg_path = hits[0]
     ens_cfg = json.loads(Path(cfg_path).read_text())
     bundle_dir = Path(ens_cfg.get("orig_bundle_dir") or Path(cfg_path).parent)
+    is_cpu_cal_cfg = bool(ens_cfg.get("cpu_calibrated", False))
 
     asset_index: dict[str, Path] = {}
+    v3_asset_index: dict[str, Path] = {}
     in_root = Path("/kaggle/input")
     if in_root.exists():
         for p_in in sorted(in_root.rglob("*")):
             if p_in.is_file():
                 if p_in.name not in asset_index or "v4" in str(p_in):
                     asset_index[p_in.name] = p_in
+                if "v3" in str(p_in):
+                    v3_asset_index[p_in.name] = p_in
+
+    extra_dirs = [
+        Path(d_s)
+        for d_s in os.environ.get("SF_EXTRA_ASSET_DIRS", "").split(os.pathsep)
+        if d_s.strip()
+    ]
 
     def resolve_asset(rel_name: str) -> Path:
         cand = bundle_dir / rel_name
         if cand.exists():
             return cand
+        for ex_d in extra_dirs:
+            ex_c = ex_d / rel_name
+            if ex_c.exists():
+                return ex_c
         if rel_name in asset_index:
             return asset_index[rel_name]
         raise FileNotFoundError(f"Missing model asset {rel_name} in {bundle_dir} and /kaggle/input")
 
+    def resolve_v3_selector_paths() -> list[str]:
+        script_dir = Path(__file__).resolve().parent
+        search_dirs = [
+            bundle_dir,
+            script_dir.parent / "configs",
+            script_dir.parent / "v3_models_upload",
+            *extra_dirs,
+        ]
+        found: list[str] = []
+        for f in range(4):
+            p_hit: Path | None = None
+            for sdir in search_dirs:
+                cp = sdir / f"v3_selector_fold{f}.txt"
+                if cp.exists():
+                    p_hit = cp
+                    break
+            if p_hit is None:
+                v3_k = v3_asset_index.get(f"selector_fold{f}.txt")
+                if v3_k is not None and v3_k.exists():
+                    p_hit = v3_k
+            if p_hit is None:
+                for ex_d in [script_dir.parent / "v3_models_upload", *extra_dirs]:
+                    cp = ex_d / f"selector_fold{f}.txt"
+                    if cp.exists() and "v3" in str(cp):
+                        p_hit = cp
+                        break
+            if p_hit is not None:
+                found.append(str(p_hit))
+        return found if len(found) == 4 else []
+
+    use_v7_cal = os.environ.get("SF_DISABLE_V7_CALIBRATION") != "1"
     arch_specs = ens_cfg["arch_groups"]
+    if use_v7_cal and has_cuda and not is_cpu_cal_cfg:
+        for grp in arch_specs:
+            bb = str(grp.get("backbone", ""))
+            is_v4_bb = ("convnext" in bb) or ("hrnet" in bb) or ("regnety" in bb)
+            if is_v4_bb:
+                grp["tta_views"] = 8
+            elif grp.get("arch") == "UnetPlusPlus":
+                grp["tta_views"] = 2
+            else:
+                grp["tta_views"] = 4
+
     weights = [float(g["weight"]) for g in arch_specs]
     p0_weights = [float(g.get("p0_weight", g["weight"])) for g in arch_specs]
     w_sum = sum(weights)
     w0_sum = sum(p0_weights)
     n_arch = len(arch_specs)
-    yolo_rels = [yrel for yrel in ens_cfg.get("yolo_ckpts", []) if (bundle_dir / yrel).exists() or yrel in asset_index]
+    yolo_rels = [
+        yrel for yrel in ens_cfg.get("yolo_ckpts", [])
+        if (bundle_dir / yrel).exists() or any((ed / yrel).exists() for ed in extra_dirs) or yrel in asset_index
+    ]
     yolo_imgsz = int(ens_cfg.get("yolo_imgsz", 1024))
     yolo_use_3ch = bool(ens_cfg.get("yolo_use_3ch", False))
     has_ultralytics = bool(yolo_rels) and (importlib.util.find_spec("ultralytics") is not None)
@@ -1316,13 +1429,16 @@ def run_worker_shard() -> None:
     selector_paths = [str(resolve_asset(fn)) for fn in selector_files]
     seg_selector_files = ens_cfg.get("seg_selector_files") or []
     seg_selector_paths = [str(resolve_asset(fn)) for fn in seg_selector_files]
+    v3_selector_paths = resolve_v3_selector_paths() if use_v7_cal else []
+
     features = ens_cfg["features"]
     seg_features = ens_cfg.get("seg_features") or []
-    yolo_gbdt_weight = float(ens_cfg.get("yolo_gbdt_weight", 1.0))
-    best_sources_set = {int(s) for s in ens_cfg["best_sources"]}
-    best_cut = float(ens_cfg["best_cut"])
+    yolo_gbdt_weight = 0.55 if use_v7_cal else float(ens_cfg.get("yolo_gbdt_weight", 1.0))
+    v3_gbdt_weight = float(ens_cfg.get("v3_gbdt_weight", 0.35)) if (use_v7_cal and v3_selector_paths) else 0.0
+    best_sources_set = {0, 1, 2, 3, 5, 6} if use_v7_cal else {int(s) for s in ens_cfg["best_sources"]}
+    best_cut = float(ens_cfg.get("v7_cut", 0.225)) if (use_v7_cal and v3_selector_paths) else float(ens_cfg["best_cut"])
     split_cost = float(ens_cfg.get("split_cost", 0.24))
-    default_views = int(ens_cfg.get("tta_views", 4))
+    default_views = 8 if (use_v7_cal and has_cuda) else int(ens_cfg.get("tta_views", 4))
     smoke_fast = os.environ.get("SF_SMOKE_FAST") == "1"
 
     all_test_files = locate_test_images()
@@ -1331,7 +1447,7 @@ def run_worker_shard() -> None:
     if not has_cuda:
         default_views = 1
     elif not is_sharded and n_arch >= 4:
-        default_views = min(default_views, 2)
+        default_views = min(default_views, 4)
     if is_sharded:
         sh_id, sh_tot = map(int, shard_spec.split("/"))
         test_files = all_test_files[sh_id::sh_tot]
@@ -1339,13 +1455,15 @@ def run_worker_shard() -> None:
         test_files = all_test_files
 
     log(
-        f"Worker initialized ({n_arch} seg families, {len(selector_paths)}+{len(seg_selector_paths)} Stage-1 GBDTs, "
-        f"{len(yolo_rels)} YOLO ckpts [3ch={yolo_use_3ch}], cut={best_cut:.2f}, split={split_cost:.2f}) "
+        f"Worker initialized ({n_arch} seg families, {len(selector_paths)}+{len(seg_selector_paths)}+{len(v3_selector_paths)} GBDTs, "
+        f"{len(yolo_rels)} YOLO ckpts [3ch={yolo_use_3ch}], a_y={yolo_gbdt_weight:.2f}, w_v3={v3_gbdt_weight:.2f}, "
+        f"srcs={sorted(best_sources_set)}, cut={best_cut:.3f}, split={split_cost:.2f}) "
         f"on {len(test_files)}/{len(all_test_files)} test images"
     )
 
     yy, xx = np.ogrid[:H, :W]
     disk_mask = (yy - H / 2.0) ** 2 + (xx - W / 2.0) ** 2 <= 940.0 ** 2
+    inner_disk = (yy - H / 2.0) ** 2 + (xx - W / 2.0) ** 2 <= 915.0 ** 2
 
     def build_smp_model(arch_name: str, backbone: str, ck_path: Path):
         sd = torch.load(str(ck_path), map_location="cpu", weights_only=True)
@@ -1365,10 +1483,12 @@ def run_worker_shard() -> None:
 
         elapsed_m = (time.time() - T0) / 60.0
         proj_m = elapsed_m * (len(test_files) / float(max(c_start, 1))) if c_start >= cur_chunk_size else 0.0
-        budget_ok = (elapsed_m < 46.0) and (c_start < cur_chunk_size or proj_m <= 53.0)
+        if has_cuda:
+            budget_ok = (elapsed_m < 180.0) and (c_start < cur_chunk_size or proj_m <= 225.0)
+        else:
+            budget_ok = (elapsed_m < 47.0) and (c_start < cur_chunk_size or proj_m <= 54.0)
 
         chunk_ch01_u8, chunk_tensors, chunk_halpha_boxes = [], [], []
-        inner_disk = (yy - H / 2.0) ** 2 + (xx - W / 2.0) ** 2 <= 915.0 ** 2
         for img_p in chunk_paths:
             img_u8 = cv2.imread(str(img_p), cv2.IMREAD_GRAYSCALE)
             if img_u8 is None:
@@ -1382,15 +1502,15 @@ def run_worker_shard() -> None:
             chunk_ch01_u8.append(ch01_u8)
             chunk_tensors.append(x_t)
 
-            # Fast H-alpha high-absorption backup boxes (used only when YOLO detects 0 boxes on a disk)
-            dark_m = ((ch01_u8[2] >= 188) & inner_disk).astype(np.uint8)
-            n_d, _, st_d, _ = cv2.connectedComponentsWithStats(dark_m, connectivity=8)
-            h_boxes = [
-                (float(st_d[kd, 0]), float(st_d[kd, 1]), float(st_d[kd, 2]), float(st_d[kd, 3]))
-                for kd in range(1, n_d)
-                if st_d[kd, 4] >= 80
-            ]
-            chunk_halpha_boxes.append(h_boxes)
+            if not has_cuda:
+                dark_m = ((ch01_u8[2] >= 188) & inner_disk).astype(np.uint8)
+                n_d, _, st_d, _ = cv2.connectedComponentsWithStats(dark_m, connectivity=8)
+                h_boxes = [
+                    (float(st_d[kd, 0]), float(st_d[kd, 1]), float(st_d[kd, 2]), float(st_d[kd, 3]))
+                    for kd in range(1, n_d)
+                    if st_d[kd, 4] >= 80
+                ]
+                chunk_halpha_boxes.append(h_boxes)
 
         active_yolo_rels = yolo_rels[:1] if smoke_fast else yolo_rels
         chunk_raw_y: list[list[tuple[float, int, dict]]] = [[] for _ in range(B)]
@@ -1417,11 +1537,11 @@ def run_worker_shard() -> None:
                     torch.cuda.empty_cache()
 
         n_yolo_active = len(active_yolo_rels) if has_ultralytics else 0
-        use_cpu_roi = (not has_cuda) and (n_yolo_active > 0)
+        use_cpu_roi = (not has_cuda) and (n_yolo_active > 0) and (os.environ.get("SF_DISABLE_CPU_ROI") != "1")
         chunk_rois: list[list[tuple[int, int, int, int]]] = []
         if use_cpu_roi:
             for i in range(B):
-                y_boxes = [tuple(map(float, mu.toBbox(yr))) for sc, _, yr in chunk_raw_y[i] if sc >= 0.05]
+                y_boxes = [tuple(map(float, mu.toBbox(yr))) for sc, _, yr in chunk_raw_y[i] if sc >= 0.03]
                 chunk_rois.append(pack_rois(y_boxes if y_boxes else chunk_halpha_boxes[i], pad=64, min_sz=224, merge_ratio=1.12))
 
         prob_mean_acc = np.zeros((B, H, W, 3), dtype=np.float32)
@@ -1449,9 +1569,13 @@ def run_worker_shard() -> None:
                     grp_acc = np.zeros((B, H, W, n_out_ch), dtype=np.float32)
                 for i in range(B):
                     if use_cpu_roi:
-                        grp_acc[i] += forward_rois_image(m0, n_out_ch, dev, chunk_tensors[i], chunk_rois[i], grp_views, smoke_fast)
+                        grp_acc[i] += forward_rois_image(
+                            m0, arch_name, backbone, n_out_ch, dev, chunk_tensors[i], chunk_rois[i], grp_views, smoke_fast
+                        )
                     else:
-                        grp_acc[i] += forward_single_image_batched(m0, n_out_ch, dev, chunk_tensors[i], grp_views, smoke_fast)
+                        grp_acc[i] += forward_single_image_batched(
+                            m0, arch_name, backbone, n_out_ch, dev, chunk_tensors[i], grp_views, smoke_fast
+                        )
                 del m0
                 gc.collect()
                 if has_cuda:
@@ -1487,6 +1611,7 @@ def run_worker_shard() -> None:
             p1_min_f16 = prob_mean_f16[:, :, :, 1]
         del prob_mean_acc, seam_acc, v3_p0_acc, p0_unw_sum, p0_unw_sq, p1_unw_min
         gc.collect()
+
         jobs = [
             (
                 chunk_paths[i].stem,
@@ -1512,7 +1637,21 @@ def run_worker_shard() -> None:
                 if (seg_selector_paths and seg_features)
                 else np.zeros((len(flat_rows), 0), dtype=np.float64)
             )
-            alpha_g = yolo_gbdt_weight if n_yolo_active > 0 else 0.0
+            if v3_selector_paths:
+                df_v3 = df_s1.copy()
+                df_v3["source"] = np.where(df_v3["source"].isin([0, 3, 6]), df_v3["source"], 0)
+                delta_v3 = df_v3["p0_v3_mean"] - df_v3["p0_mean"]
+                df_v3["p0_mean"] = df_v3["p0_v3_mean"]
+                df_v3["p0_q25"] = np.clip(df_v3["p0_q25"] + delta_v3, 0.0, 1.0)
+                df_v3["p0_q75"] = np.clip(df_v3["p0_q75"] + delta_v3, 0.0, 1.0)
+                df_v3["p0_max"] = np.clip(df_v3["p0_max"] + 0.5 * delta_v3, 0.0, 1.0)
+                df_v3["p1_p0_ratio"] = df_v3["p1_mean"] / np.maximum(df_v3["p0_mean"], 1e-4)
+                X_v3 = np.ascontiguousarray(df_v3[V3_FEATURES].to_numpy(dtype=np.float64))
+            else:
+                X_v3 = np.zeros((len(flat_rows), 0), dtype=np.float64)
+
+            alpha_g = (min(yolo_gbdt_weight, 0.45) if n_yolo_active == 1 else yolo_gbdt_weight) if n_yolo_active > 0 else 0.0
+            active_w_v3 = v3_gbdt_weight if (v3_selector_paths and n_yolo_active > 0) else 0.0
             pid_tag = f"{os.getpid()}_{c_start}"
             in_npz = Path(f"/tmp/sf_lgb_in_{pid_tag}.npz")
             out_npy = Path(f"/tmp/sf_lgb_out_{pid_tag}.npy")
@@ -1521,9 +1660,12 @@ def run_worker_shard() -> None:
                     in_npz,
                     X_s1=X_s1,
                     X_seg=X_seg,
+                    X_v3=X_v3,
                     sel_paths=np.asarray(selector_paths, dtype=str),
                     seg_sel_paths=np.asarray(seg_selector_paths, dtype=str),
+                    v3_sel_paths=np.asarray(v3_selector_paths, dtype=str),
                     alpha_g=np.asarray([alpha_g], dtype=np.float64),
+                    w_v3=np.asarray([active_w_v3], dtype=np.float64),
                 )
                 lgb_env = os.environ.copy()
                 lgb_env["OMP_NUM_THREADS"] = "1"
@@ -1584,7 +1726,7 @@ def main() -> None:
     test_files = locate_test_images()
 
     cpu_cal_cfg: Path | None = None
-    if n_hw_gpus == 0:
+    if n_hw_gpus == 0 and os.environ.get("SF_DISABLE_CPU_ROI") != "1":
         cpu_cal_cfg = Path(f"/tmp/sf_cpu_cal_cfg_{os.getpid()}.json")
         cal_env = os.environ.copy()
         subprocess.check_call(
