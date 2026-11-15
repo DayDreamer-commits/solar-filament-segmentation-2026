@@ -1,0 +1,93 @@
+{
+  "arch_groups": [
+    {
+      "arch": "Unet",
+      "backbone": "efficientnet-b4",
+      "weight": 0.42,
+      "ckpts": [
+        "unet_efficientnet_b4_fold0.pt",
+        "unet_efficientnet_b4_fold1.pt",
+        "unet_efficientnet_b4_fold2.pt",
+        "unet_efficientnet_b4_fold3.pt"
+      ]
+    },
+    {
+      "arch": "UnetPlusPlus",
+      "backbone": "densenet169",
+      "weight": 0.33,
+      "ckpts": [
+        "unetplusplus_densenet169_fold0.pt",
+        "unetplusplus_densenet169_fold1.pt",
+        "unetplusplus_densenet169_fold2.pt",
+        "unetplusplus_densenet169_fold3.pt"
+      ]
+    },
+    {
+      "arch": "Unet",
+      "backbone": "resnext50_32x4d",
+      "weight": 0.25,
+      "ckpts": [
+        "unet_resnext50_32x4d_fold0.pt",
+        "unet_resnext50_32x4d_fold1.pt",
+        "unet_resnext50_32x4d_fold2.pt",
+        "unet_resnext50_32x4d_fold3.pt"
+      ]
+    }
+  ],
+  "yolo_ckpts": [
+    "v3_yolo_fold0.pt",
+    "v3_yolo_fold1.pt",
+    "v3_yolo_fold2.pt",
+    "v3_yolo_fold3.pt"
+  ],
+  "features": [
+    "source",
+    "area",
+    "log_area",
+    "bw",
+    "bh",
+    "fill",
+    "aspect",
+    "disk_radius",
+    "p0_mean",
+    "p0_q25",
+    "p0_q75",
+    "p0_max",
+    "p0_border_drop",
+    "p1_mean",
+    "p1_q25",
+    "p1_q75",
+    "p1_max",
+    "p1_p0_ratio",
+    "p2_mean",
+    "p2_max",
+    "n_cores",
+    "n_p1_cores",
+    "cc_iou",
+    "image_cc_count",
+    "p0_arch_std",
+    "p1_arch_min",
+    "yolo_iou",
+    "yolo_conf",
+    "n_yolo_sub",
+    "yolo_contain",
+    "yolo_span_ccs",
+    "yolo_area_ratio"
+  ],
+  "best_sources": [
+    0,
+    3,
+    6
+  ],
+  "best_cut": 0.24,
+  "use_d4": true,
+  "oof_PQ": 0.45413985308120747,
+  "nested_oof_PQ": 0.45132346370014126,
+  "val141_PQ": 0.4613622710793614,
+  "selector_files": [
+    "v3_selector_fold0.txt",
+    "v3_selector_fold1.txt",
+    "v3_selector_fold2.txt",
+    "v3_selector_fold3.txt"
+  ]
+}

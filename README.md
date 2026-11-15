@@ -79,16 +79,24 @@ pip install -r requirements.txt
 ## 5. Reproduce Dynamic Test Inference Without Re-Training
 
 1. Run Cell 1 of `pipeline_reproduction.ipynb` to download and verify stored weights in `./weights`.
-2. Run `scripts/reproduce_infer.sh` with `TEST_DIR` set to the `2048 x 2048` test images directory.
+2. Run `scripts/reproduce_infer.sh` to reproduce the `v4.6` 28-model ensemble (`Ref 58364478`).
+3. Run `scripts/reproduce_infer_v3.sh` to reproduce the `v3` 4-family ensemble (`Ref 58250373`).
 
 ```bash
+# Reproduce v4.6 28-model submission (Ref 58364478)
 BUNDLE_DIR=./weights \
 TEST_DIR=/path/to/MAGFiLO_1.0_Kaggle_2026/test/test_images \
 OUT_CSV=./submission.csv \
 bash scripts/reproduce_infer.sh
+
+# Reproduce v3 4-family submission (Ref 58250373)
+BUNDLE_DIR=./weights \
+TEST_DIR=/path/to/MAGFiLO_1.0_Kaggle_2026/test/test_images \
+OUT_CSV=./submission_v3.csv \
+bash scripts/reproduce_infer_v3.sh
 ```
 
-The inference script detects `1` or `2` GPUs automatically and runs Welford streaming inference across chunks of `24` images. Next, the `MWIS` solver selects a disjoint set of filament masks and verifies `0` overlapping pixels in `./submission.csv`.
+Both inference scripts detect `1` or `2` GPUs automatically and stream checkpoints across chunks of `24` images. Next, each post-processor selects pixel-disjoint filament masks and verifies `0` overlapping pixels in the output CSV.
 
 ---
 

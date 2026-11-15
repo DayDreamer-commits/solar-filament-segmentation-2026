@@ -1,8 +1,8 @@
 {
   "release_tag": "v1.0.0",
   "repository": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026",
-  "total_assets": 29,
-  "total_bytes": 1907599525,
+  "total_assets": 30,
+  "total_bytes": 2074811163,
   "assets": [
     {
       "name": "fpn_timm_regnety_064_fold0.pt",
@@ -153,6 +153,12 @@
       "size_bytes": 78422176,
       "sha256": "22fad1a59ec4e1848f644c4cc6f06eb2838b4698933e96f51a09dc687f71d81e",
       "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/unetplusplus_densenet169_fold3.pt"
+    },
+    {
+      "name": "v3_yolo_and_lgbm_bundle.tar.gz",
+      "size_bytes": 167211638,
+      "sha256": "97052279f61b04846bc5e11be3f82113266d06d9f6944d54893b4384821c2660",
+      "url": "https://github.com/DayDreamer-commits/solar-filament-segmentation-2026/releases/download/v1.0.0/v3_yolo_and_lgbm_bundle.tar.gz"
     },
     {
       "name": "yolo_fold0.pt",
